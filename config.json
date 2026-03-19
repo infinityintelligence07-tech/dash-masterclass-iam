@@ -1,0 +1,131 @@
+{
+  "empresa": "IAM",
+  "produto": "Gestão de Masterclass",
+  "polos": [
+    "Americana",
+    "Balneário Camboriú",
+    "Belo Horizonte",
+    "Fortaleza",
+    "Goiânia",
+    "Londrina",
+    "Porto Alegre",
+    "Vitória"
+  ],
+  "palestrantes": [
+    "Bianca",
+    "Cassi",
+    "Ezequiel",
+    "Guilherme",
+    "Isabella",
+    "Jaquiele",
+    "Michelle",
+    "Natalia",
+    "Palestrante",
+    "Pedro",
+    "Vinicius",
+    "Ygor"
+  ],
+  "cidades": [],
+  "cidades_rel": {
+    "Americana": [
+      "AMERICANA",
+      "ARARAQUARA",
+      "BRAGANÇA PAULISTA",
+      "CAMPINAS",
+      "FRANCA",
+      "GUARUJÁ",
+      "GUARULHOS",
+      "INDAIATUBA",
+      "ITATIBA",
+      "ITU",
+      "JACAREÍ",
+      "JAGUARIÚNA",
+      "JUNDIAÍ",
+      "LIMEIRA",
+      "MOGIGUAÇU",
+      "OSASCO",
+      "PAULÍNIA",
+      "PIRACICABA",
+      "PRAIA GRANDE",
+      "RIBEIRÃO PRETO",
+      "SANTO ANDRÉ",
+      "SANTOS",
+      "SOROCABA",
+      "SÃO BERNARDO DO CAMPO",
+      "SÃO JOSÉ DO RIO PRETO",
+      "SÃO JOSÉ DOS CAMPOS",
+      "TAUBATÉ",
+      "VALINHOS"
+    ],
+    "Londrina": [
+      "BAURU/SP",
+      "CAMPO MOURÃO",
+      "LONDRINA",
+      "MARINGÁ",
+      "MARÍLIA/SP",
+      "PRESIDENTE PRUDENTE/SP"
+    ],
+    "Belo Horizonte": [
+      "BH",
+      "DIVINÓPOLIS",
+      "SETE LAGOAS",
+      "VESPASIANO"
+    ],
+    "Balneário Camboriú": [
+      "B. CAMBORIÚ",
+      "BLUMENAU",
+      "BRUSQUE",
+      "FLORIANÓPOLIS",
+      "ITAJAÍ",
+      "ITAPEMA",
+      "JARAGUÁ DO SUL",
+      "JOINVILLE",
+      "PALHOÇA",
+      "SAO JOSE"
+    ],
+    "Porto Alegre": [
+      "BENTO GONÇALVES",
+      "CANOAS",
+      "CAXIAS DO SUL",
+      "CRICIÚMA/SC",
+      "GRAMADO",
+      "GRAVATAÍ",
+      "LAJEADO",
+      "NOVO HAMBURGO",
+      "PORTO ALEGRE",
+      "TUBARÃO/SC"
+    ],
+    "Vitória": [
+      "CARIACICA",
+      "COLATINA",
+      "LINHARES",
+      "SERRA",
+      "VILA VELHA",
+      "VITÓRIA"
+    ],
+    "Fortaleza": [
+      "FORTALEZA"
+    ],
+    "Goiânia": [
+      "ANÁPOLIS",
+      "APARECIDA DE GOIÂNIA",
+      "BRASÍLIA/DF",
+      "CALDAS NOVAS",
+      "GOIÂNIA",
+      "RIO VERDE",
+      "SENADOR CANEDO",
+      "TRINDADE"
+    ]
+  },
+  "regras_comissao_default": {
+    "f1_max": 7,
+    "f1_val": 0.0,
+    "f2_max": 12,
+    "f2_val": 60.0,
+    "f3_max": 16,
+    "f3_val": 70.0,
+    "f4_max": 20,
+    "f4_val": 80.0,
+    "f5_val": 100.0
+  }
+}

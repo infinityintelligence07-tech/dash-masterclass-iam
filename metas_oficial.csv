@@ -1,0 +1,24 @@
+﻿ID,Tenant,Mes,Ano,Polo,Quantidade_MC,Meta_Vendas_Por_MC,Meta_Inscricoes
+45d5cef8-d978-4a06-81e9-6147ea68b899,IAM,1,2026,Fortaleza,2,9,18
+0769fe7b-ca6b-478f-be9f-8b1a110ca6bc,IAM,1,2026,Americana,13,9,117
+5f8738b5-cde7-4b42-9e15-95b0ead439e9,IAM,1,2026,Londrina,8,9,72
+19d7c67d-203b-4fa0-a566-594ef301d38d,IAM,1,2026,Belo Horizonte,5,9,45
+fe67c16f-a031-49de-820b-38d5d6aa6e43,IAM,1,2026,Balneário Camboriú,10,9,90
+2a76c9ff-bbf6-4105-981f-50a5cc873112,IAM,1,2026,Vitória,4,9,36
+6a06d9e4-08aa-4b4c-b8b8-056accdf1897,IAM,1,2026,Porto Alegre,4,9,36
+30a74f66-7e59-4b60-9fc7-757cb64e9351,IAM,1,2026,Goiânia,9,9,81
+bb9af971-0e97-4d59-bce5-8ec8af2295b3,IAM,2,2026,Americana,18,8,144
+b5aef144-b1ea-440a-baff-31ba668213a1,IAM,2,2026,Londrina,2,8,16
+243edc69-3da3-406f-ac74-12309bdc3ec0,IAM,2,2026,Belo Horizonte,2,8,16
+a766ed47-5bab-48ec-b8a9-142afed52382,IAM,2,2026,Balneário Camboriú,5,8,40
+b32ff45f-d9c2-49ba-a030-5620fc563cb6,IAM,2,2026,Vitória,5,8,40
+2ca83b93-15f7-4994-aee1-8fbecdc395cc,IAM,2,2026,Porto Alegre,9,8,72
+7a25312c-953d-4bc2-b697-87f444d1b2fb,IAM,2,2026,Fortaleza,2,8,16
+a417d965-5c75-4200-bd17-96042c6bfd60,IAM,3,2026,Americana,16,8,128
+c5dafdaf-1124-4a17-9137-069104daab52,IAM,3,2026,Londrina,7,8,56
+09dd6d13-c1fd-4167-8838-8f0fa02612d5,IAM,3,2026,Belo Horizonte,4,8,32
+6565cf4c-d6c1-4b6f-964f-c09fbbf3a18d,IAM,3,2026,Balneário Camboriú,9,8,72
+dfdc868e-79f8-4924-bfc7-9dc5667c945b,IAM,3,2026,Vitória,4,8,32
+cc473951-c369-4cd5-8b58-37644155c9f2,IAM,3,2026,Porto Alegre,2,8,16
+b44fe582-1d8e-470c-9cf1-d8b073d004e3,IAM,3,2026,Fortaleza,3,8,24
+60a231be-0919-4f3b-bc77-dc05689e8452,IAM,3,2026,Goiânia,5,8,40
