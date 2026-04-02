@@ -428,7 +428,7 @@ def render_ok_modal():
     @st.dialog("✅ Sucesso")
     def _dlg():
         st.success(msg)
-        if st.button("Fechar", type="primary", use_container_width=True):
+        if st.button("Fechar", type="primary", width='stretch'):
             st.session_state["_ok_open"] = False
             st.rerun()
     _dlg()
@@ -544,6 +544,11 @@ def load_config() -> dict:
             cfg["cidades_rel"][p] = sorted(list({str(x).strip().upper() for x in cfg["cidades_rel"][p] if str(x).strip()}))
         cfg["polos"] = sorted(list({str(x).strip() for x in cfg.get("polos", []) if str(x).strip()}))
         cfg["palestrantes"] = sorted(list({str(x).strip() for x in cfg.get("palestrantes", []) if str(x).strip()}))
+        
+        if "regras_comissao_default" not in cfg or not isinstance(cfg.get("regras_comissao_default"), dict):
+            cfg["regras_comissao_default"] = default_comissao.copy()
+        if "regras_comissao_periodo" not in cfg or not isinstance(cfg.get("regras_comissao_periodo"), dict):
+            cfg["regras_comissao_periodo"] = {}
         
         # Migração automática para o padrão de 5 faixas, se o arquivo antigo tiver 6 faixas
         if "regras_comissao_default" not in cfg or "f6_val" in cfg["regras_comissao_default"]:
@@ -718,7 +723,7 @@ def dialog_detalhes_palestrante(palestrante, df):
     view_df["Data"] = pd.to_datetime(view_df["Data"]).dt.strftime("%d/%m/%Y")
     view_df["Conversão"] = np.where(view_df["Sala"] > 0, (view_df["Inscricoes"] / view_df["Sala"] * 100).round(1).astype(str) + "%", "0%")
     
-    st.dataframe(view_df, hide_index=True, use_container_width=True)
+    st.dataframe(view_df, hide_index=True, width='stretch')
 
 @st.dialog("📄 Relatório Detalhado de Comissão", width="large")
 def dialog_relatorio_comissao(palestrante, df_mes, regra, mes, ano):
@@ -772,7 +777,7 @@ def dialog_relatorio_comissao(palestrante, df_mes, regra, mes, ano):
     view_df_fmt["Valor por Insc. (R$)"] = view_df_fmt["Valor por Insc. (R$)"].apply(fmt_br_money)
     view_df_fmt["Comissão Total (R$)"] = view_df_fmt["Comissão Total (R$)"].apply(fmt_br_money)
     
-    st.dataframe(view_df_fmt, hide_index=True, use_container_width=True)
+    st.dataframe(view_df_fmt, hide_index=True, width='stretch')
     
     st.markdown("<br>", unsafe_allow_html=True)
     
@@ -799,7 +804,7 @@ def dialog_relatorio_comissao(palestrante, df_mes, regra, mes, ano):
         file_name=f"comissao_{palestrante}_{mes:02d}_{ano}.csv",
         mime="text/csv",
         type="primary",
-        use_container_width=False # Botão padrão sem expandir
+        width='content'  # Botão padrão sem expandir
     )
 
 # =========================================================
@@ -988,7 +993,7 @@ def module_dashboard(df_mc, df_mt, cfg):
                     fig1 = px.line(timeline, x="Mês", y=["Projetado", "Realizado"], markers=True)
                     fig1.update_traces(line=dict(width=3), marker=dict(size=7, opacity=0.92))
                 fig1.update_layout(yaxis_title="Inscrições", xaxis_title=None)
-                st.plotly_chart(apply_plotly_theme(fig1), use_container_width=True)
+                st.plotly_chart(apply_plotly_theme(fig1), width='stretch')
 
     with chart_col2:
         with st.container(border=True):
@@ -1008,7 +1013,7 @@ def module_dashboard(df_mc, df_mt, cfg):
                 fig2 = px.bar(view, x="Polo", y=["Projetado", "Realizado"], barmode="group")
                 fig2.update_traces(marker_line_width=0, opacity=0.92)
                 fig2.update_layout(yaxis_title="Inscrições", xaxis_title=None)
-                st.plotly_chart(apply_plotly_theme(fig2), use_container_width=True)
+                st.plotly_chart(apply_plotly_theme(fig2), width='stretch')
 
     # --- UI: GRID DE INFORMAÇÕES DETALHADAS ---
     col_pal, col_cid, col_est = st.columns([1.5, 1.1, 1.1], gap="medium")
@@ -1206,7 +1211,7 @@ def module_dashboard(df_mc, df_mt, cfg):
                 df_det = df_f[det_cols].sort_values("Data", ascending=False).copy()
                 df_det["Data"] = pd.to_datetime(df_det["Data"]).dt.strftime("%d/%m/%Y")
                 df_det["Conversão"] = np.where(df_det["Sala"] > 0, (df_det["Inscricoes"] / df_det["Sala"] * 100).round(1).astype(str) + "%", "0%")
-                st.dataframe(df_det, hide_index=True, use_container_width=True)
+                st.dataframe(df_det, hide_index=True, width='stretch')
 
     # ---------------------------------------------------------
     # CAPTURA DO CLIQUE NO NOME DO PALESTRANTE VIA QUERY PARAM
@@ -1273,12 +1278,12 @@ def module_masterclass(df_mc, cfg):
                 view_mc.insert(0, "Excluir?", False)
                 cols_ordem = ["Excluir?", "Data", "Polo", "Cidade", "Palestrante", "Sala", "Inscricoes", "ID", "Tenant"]
 
-                edited_mc = st.data_editor(view_mc[cols_ordem], hide_index=True, use_container_width=True, disabled=["ID", "Tenant"])
+                edited_mc = st.data_editor(view_mc[cols_ordem], hide_index=True, width='stretch', disabled=["ID", "Tenant"])
 
                 @st.dialog("⚠️ Confirmação de Edição")
                 def confirm_edit_mc_dialog(df_to_save):
                     st.warning("Tem certeza que deseja salvar as alterações realizadas nos registros de Masterclass?")
-                    if st.button("✅ Sim, realizar edição", type="primary", use_container_width=True):
+                    if st.button("✅ Sim, realizar edição", type="primary", width='stretch'):
                         save_masterclass(df_to_save.drop(columns=["Excluir?"]))
                         audit("Edição em Lote Masterclass")
                         st.session_state["_ok_open"] = True
@@ -1289,7 +1294,7 @@ def module_masterclass(df_mc, cfg):
                 def confirm_delete_mc_dialog(df_to_delete):
                     st.error(f"Você marcou {len(df_to_delete)} masterclass(es) para exclusão.")
                     st.warning("Esta ação removerá esses registros de todos os relatórios financeiros.")
-                    if st.button("🗑️ Sim, excluir permanentemente", type="primary", use_container_width=True):
+                    if st.button("🗑️ Sim, excluir permanentemente", type="primary", width='stretch'):
                         ids_to_delete = df_to_delete["ID"].tolist()
                         save_masterclass(df_mc[~df_mc["ID"].isin(ids_to_delete)].copy())
                         audit("Exclusão em Lote Masterclass", f"{len(ids_to_delete)} removidas")
@@ -1299,11 +1304,11 @@ def module_masterclass(df_mc, cfg):
 
                 b1, b2, _ = st.columns([2, 2, 6], gap="small")
                 with b1:
-                    if st.button("💾 Salvar Alterações", type="primary", use_container_width=True, key="save_mc"):
+                    if st.button("💾 Salvar Alterações", type="primary", width='stretch', key="save_mc"):
                         confirm_edit_mc_dialog(edited_mc[edited_mc["Excluir?"] == False].copy())
                 with b2:
                     df_mc_delete = edited_mc[edited_mc["Excluir?"] == True]
-                    if st.button("🗑️ Excluir Selecionados", type="secondary", use_container_width=True, disabled=len(df_mc_delete) == 0, key="del_mc"):
+                    if st.button("🗑️ Excluir Selecionados", type="secondary", width='stretch', disabled=len(df_mc_delete) == 0, key="del_mc"):
                         confirm_delete_mc_dialog(df_mc_delete)
             else:
                 render_html(render_empty_state("Nenhum histórico de masterclass para editar.", "📋"))
@@ -1329,7 +1334,7 @@ def module_metas(df_mt, cfg):
                 with c3:
                     st.write("")
                     st.write("")
-                    submit_meta = st.form_submit_button("Salvar Nova Meta", type="primary", use_container_width=True)
+                    submit_meta = st.form_submit_button("Salvar Nova Meta", type="primary", width='stretch')
 
                 if submit_meta:
                     if "Selecione" in polo:
@@ -1358,12 +1363,12 @@ def module_metas(df_mt, cfg):
                 view_mt.insert(0, "Excluir?", False)
                 cols_ordem = ["Excluir?", "Mes", "Ano", "Polo", "Quantidade_MC", "Meta_Vendas_Por_MC", "Meta_Inscricoes", "ID", "Tenant"]
 
-                edited = st.data_editor(view_mt[cols_ordem], hide_index=True, use_container_width=True, disabled=["Meta_Inscricoes", "ID", "Tenant"])
+                edited = st.data_editor(view_mt[cols_ordem], hide_index=True, width='stretch', disabled=["Meta_Inscricoes", "ID", "Tenant"])
 
                 @st.dialog("⚠️ Confirmação de Edição")
                 def confirm_edit_dialog(df_to_save):
                     st.warning("Tem certeza que deseja salvar as alterações realizadas na tabela?")
-                    if st.button("✅ Sim, realizar edição", type="primary", use_container_width=True):
+                    if st.button("✅ Sim, realizar edição", type="primary", width='stretch'):
                         df_to_save["Meta_Inscricoes"] = df_to_save["Quantidade_MC"] * df_to_save["Meta_Vendas_Por_MC"]
                         save_metas(df_to_save.drop(columns=["Excluir?"]))
                         audit("Edição em Lote na Tabela de Metas")
@@ -1375,7 +1380,7 @@ def module_metas(df_mt, cfg):
                 def confirm_delete_dialog(df_to_delete):
                     st.error(f"Você marcou {len(df_to_delete)} meta(s) para exclusão.")
                     st.warning("Esta ação removerá esses números de todos os relatórios.")
-                    if st.button("🗑️ Sim, excluir permanentemente", type="primary", use_container_width=True):
+                    if st.button("🗑️ Sim, excluir permanentemente", type="primary", width='stretch'):
                         ids_to_delete = df_to_delete["ID"].tolist()
                         save_metas(df_mt[~df_mt["ID"].isin(ids_to_delete)].copy())
                         audit("Exclusão em Lote", f"{len(ids_to_delete)} metas removidas")
@@ -1385,11 +1390,11 @@ def module_metas(df_mt, cfg):
 
                 b1, b2, _ = st.columns([2, 2, 6], gap="small")
                 with b1:
-                    if st.button("💾 Salvar Tabela", type="primary", use_container_width=True):
+                    if st.button("💾 Salvar Tabela", type="primary", width='stretch'):
                         confirm_edit_dialog(edited[edited["Excluir?"] == False].copy())
                 with b2:
                     df_to_delete = edited[edited["Excluir?"] == True]
-                    if st.button("🗑️ Excluir Selecionados", type="secondary", use_container_width=True, disabled=len(df_to_delete) == 0):
+                    if st.button("🗑️ Excluir Selecionados", type="secondary", width='stretch', disabled=len(df_to_delete) == 0):
                         confirm_delete_dialog(df_to_delete)
             else:
                 render_html(render_empty_state("Nenhuma meta cadastrada.", "🎯"))
@@ -1414,7 +1419,7 @@ def module_metas(df_mt, cfg):
                     nova_meta = st.number_input("Nova Meta por Palestra", min_value=0, step=1, key="nm")
                 
                 st.write("")
-                submit_periodo = st.form_submit_button("🔄 Aplicar Nova Meta ao Período", type="primary", use_container_width=True)
+                submit_periodo = st.form_submit_button("🔄 Aplicar Nova Meta ao Período", type="primary", width='stretch')
 
             if submit_periodo:
                 start_ym = ano_ini * 100 + mes_ini
@@ -1464,7 +1469,7 @@ def module_comissoes(df_mc, cfg):
             with c3:
                 st.write("")
                 st.write("")
-                if st.button("Aplicar Filtro", use_container_width=True):
+                if st.button("Aplicar Filtro", width='stretch'):
                     pass # Só para re-renderizar
             
             # Buscar a regra aplicável
@@ -1539,7 +1544,7 @@ def module_comissoes(df_mc, cfg):
                         c3.markdown(f"<div style='padding-top:10px; text-align:center; font-size:14px;'>{fmt_br(row['Inscricoes'])}</div>", unsafe_allow_html=True)
                         c4.markdown(f"<div style='padding-top:10px; text-align:right; font-weight:800; font-size:14px; color:var(--iam-royal);'>{fmt_br_money(row['Comissao'])}</div>", unsafe_allow_html=True)
                         with c5:
-                            # O Botão aciona o Diálogo detalhado do palestrante (use_container_width removido para ficar pequeno)
+                            # O Botão aciona o Diálogo detalhado do palestrante (sem width stretch para ficar pequeno)
                             if st.button("Detalhar", key=f"btn_det_{row['Palestrante']}_{mes_com}_{ano_com}"):
                                 dialog_relatorio_comissao(row['Palestrante'], df_com, regra_ativa, mes_com, ano_com)
                         st.markdown("<hr style='margin:0; border-color:var(--iam-g100);'>", unsafe_allow_html=True)
@@ -1588,9 +1593,9 @@ def module_comissoes(df_mc, cfg):
                 st.write("")
                 col_btn1, col_btn2, _ = st.columns([2, 2, 4])
                 with col_btn1:
-                    submit_regra = st.form_submit_button("💾 Salvar Regra para o Mês", type="primary", use_container_width=True)
+                    submit_regra = st.form_submit_button("💾 Salvar Regra para o Mês", type="primary", width='stretch')
                 with col_btn2:
-                    restore_regra = st.form_submit_button("🔄 Restaurar Padrão do Sistema", type="secondary", use_container_width=True)
+                    restore_regra = st.form_submit_button("🔄 Restaurar Padrão do Sistema", type="secondary", width='stretch')
                 
                 if submit_regra:
                     if f1_max >= f2_max or f2_max >= f3_max or f3_max >= f4_max:
@@ -1603,14 +1608,15 @@ def module_comissoes(df_mc, cfg):
                             "f4_max": f4_max, "f4_val": f4_val,
                             "f5_val": f5_val
                         }
-                        cfg["regras_comissao_periodo"][chave_edit] = nova_regra
+                        cfg.setdefault("regras_comissao_periodo", {})[chave_edit] = nova_regra
                         save_config(cfg)
                         audit("Regra de Comissão Alterada", f"Período: {chave_edit}")
                         ok_modal(f"Regra customizada para {mes_regra}/{ano_regra} salva com sucesso!")
                 
                 if restore_regra:
-                    if chave_edit in cfg.get("regras_comissao_periodo", {}):
-                        del cfg["regras_comissao_periodo"][chave_edit]
+                    rp = cfg.setdefault("regras_comissao_periodo", {})
+                    if chave_edit in rp:
+                        del rp[chave_edit]
                         save_config(cfg)
                         audit("Regra de Comissão Restaurada", f"Período: {chave_edit} voltou ao padrão")
                         ok_modal(f"O mês {mes_regra}/{ano_regra} voltou a usar a regra padrão do sistema.")
@@ -1639,7 +1645,7 @@ def module_agenda(df_mc, cfg):
         ag_pal = st.selectbox("Palestrante", ["— Selecione —"] + cfg["palestrantes"], key="ag_pal")
         
         st.write("")
-        if st.button("💾 Salvar Agenda", type="primary", use_container_width=True):
+        if st.button("💾 Salvar Agenda", type="primary", width='stretch'):
             if ag_cid == "— Selecione —" or ag_pal == "— Selecione —":
                 st.error("Preencha Cidade e Palestrante.")
             else:
@@ -1681,7 +1687,7 @@ def module_agenda(df_mc, cfg):
             ev_sel = st.selectbox("Selecione o evento que deseja excluir:", ["— Selecione —"] + list(eventos_dict.keys()), key="del_agenda_sel_modal")
             
             st.write("")
-            if st.button("🗑️ Confirmar Exclusão", type="primary", use_container_width=True):
+            if st.button("🗑️ Confirmar Exclusão", type="primary", width='stretch'):
                 if ev_sel != "— Selecione —":
                     id_to_delete = eventos_dict[ev_sel]
                     df_mc_new = df_mc[df_mc["ID"] != id_to_delete].copy()
@@ -1704,12 +1710,12 @@ def module_agenda(df_mc, cfg):
         with c4:
             st.write("")
             st.markdown("<div style='margin-top: 2px;'></div>", unsafe_allow_html=True)
-            if st.button("➕ Nova Agenda", type="primary", use_container_width=True):
+            if st.button("➕ Nova Agenda", type="primary", width='stretch'):
                 dialog_nova_agenda()
         with c5:
             st.write("")
             st.markdown("<div style='margin-top: 2px;'></div>", unsafe_allow_html=True)
-            if st.button("🗑️ Excluir Agenda", type="secondary", use_container_width=True):
+            if st.button("🗑️ Excluir Agenda", type="secondary", width='stretch'):
                 dialog_excluir_agenda(mes_sel, ano_sel)
 
         st.write("") # Espaçador para o grid
@@ -1784,7 +1790,7 @@ def module_cadastro(cfg):
                     novo = st.text_input(f"Adicionar {obj_name}")
                 with c2:
                     st.write("")
-                    submit = st.form_submit_button("Salvar", use_container_width=True)
+                    submit = st.form_submit_button("Salvar", width='stretch')
 
                 if submit and novo.strip():
                     cfg[key_dict] = sorted(list(set(cfg[key_dict] + [novo.strip()])))
@@ -1793,7 +1799,7 @@ def module_cadastro(cfg):
                     save_config(cfg)
                     ok_modal("Adicionado")
 
-            st.dataframe(pd.DataFrame({obj_name: cfg[key_dict]}), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame({obj_name: cfg[key_dict]}), hide_index=True, width='stretch')
 
             del_item = st.selectbox(f"Excluir {obj_name}", ["—"] + cfg[key_dict], key=f"del_{key_dict}")
             if del_item != "—" and st.button(f"🗑️ Remover {del_item}", key=f"btn_{key_dict}", type="secondary"):
@@ -1816,7 +1822,7 @@ def module_cadastro(cfg):
                         novo_cid = st.text_input(f"Adicionar Cidade ao polo {sel_polo_cad}")
                     with c2:
                         st.write("")
-                        submit_cid = st.form_submit_button("Salvar Cidade", use_container_width=True)
+                        submit_cid = st.form_submit_button("Salvar Cidade", width='stretch')
 
                     if submit_cid and novo_cid.strip():
                         if sel_polo_cad not in cfg["cidades_rel"]: cfg["cidades_rel"][sel_polo_cad] = []
@@ -1825,7 +1831,7 @@ def module_cadastro(cfg):
                         ok_modal(f"Cidade adicionada ao polo {sel_polo_cad}!")
 
                 cidades_do_polo = cfg["cidades_rel"].get(sel_polo_cad, [])
-                st.dataframe(pd.DataFrame({"Cidades atreladas": cidades_do_polo}), hide_index=True, use_container_width=True)
+                st.dataframe(pd.DataFrame({"Cidades atreladas": cidades_do_polo}), hide_index=True, width='stretch')
 
                 if cidades_do_polo:
                     del_cid = st.selectbox(f"Excluir Cidade do polo {sel_polo_cad}", ["—"] + cidades_do_polo, key=f"del_cid_{sel_polo_cad}")
