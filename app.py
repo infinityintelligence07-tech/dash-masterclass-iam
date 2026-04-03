@@ -49,6 +49,7 @@ IAM_WARNING = "#F59E0B"
 MASTERCLASS_COLS = ["ID", "Tenant", "Data", "Polo", "Cidade", "Sala", "Inscricoes", "Palestrante"]
 METAS_COLS       = ["ID", "Tenant", "Mes", "Ano", "Polo", "Quantidade_MC", "Meta_Vendas_Por_MC", "Meta_Inscricoes"]
 AUDIT_COLS       = ["Timestamp", "Tenant", "Acao", "Detalhes", "Registros"]
+COMISSAO_RULE_KEYS = ["f1_max", "f1_val", "f2_max", "f2_val", "f3_max", "f3_val", "f4_max", "f4_val", "f5_min", "f5_val"]
 
 DEFAULT_POLOS = [
     "Americana", "Balneário Camboriú", "Londrina", "Belo Horizonte",
@@ -520,12 +521,14 @@ def load_config() -> dict:
         "f2_max": 12, "f2_val": 60.0,
         "f3_max": 16, "f3_val": 70.0,
         "f4_max": 20, "f4_val": 80.0,
-        "f5_val": 100.0
+        "f5_min": 21,
+        "f5_val": 100.0,
     }
 
     if not os.path.exists(CONFIG_FILE):
         default["regras_comissao_default"] = default_comissao
         default["regras_comissao_periodo"] = {}
+        default["regras_comissao_historico"] = []
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(default, f, ensure_ascii=False, indent=2)
         return default
@@ -549,6 +552,8 @@ def load_config() -> dict:
             cfg["regras_comissao_default"] = default_comissao.copy()
         if "regras_comissao_periodo" not in cfg or not isinstance(cfg.get("regras_comissao_periodo"), dict):
             cfg["regras_comissao_periodo"] = {}
+        if "regras_comissao_historico" not in cfg or not isinstance(cfg.get("regras_comissao_historico"), list):
+            cfg["regras_comissao_historico"] = []
         
         # Migração automática para o padrão de 5 faixas, se o arquivo antigo tiver 6 faixas
         if "regras_comissao_default" not in cfg or "f6_val" in cfg["regras_comissao_default"]:
@@ -561,14 +566,55 @@ def load_config() -> dict:
                             "f2_max": 12, "f2_val": 60.0,
                             "f3_max": 16, "f3_val": 70.0,
                             "f4_max": 20, "f4_val": 80.0,
-                            "f5_val": v.get("f6_val", 100.0) 
+                            "f5_min": 21,
+                            "f5_val": v.get("f6_val", 100.0),
                         }
             save_config(cfg)
-            
+
+        # f5_min: início inclusivo da faixa 5 (faixa 4 = f3_max < insc < f5_min)
+        rc_def = cfg.get("regras_comissao_default")
+        if isinstance(rc_def, dict) and "f5_min" not in rc_def:
+            rc_def["f5_min"] = int(rc_def.get("f4_max", 20)) + 1
+            save_config(cfg)
+        rc_per = cfg.get("regras_comissao_periodo", {})
+        migra_periodo = False
+        for _pk, rv in list(rc_per.items()):
+            if isinstance(rv, dict) and "f5_min" not in rv:
+                rv["f5_min"] = int(rv.get("f4_max", 20)) + 1
+                migra_periodo = True
+        if migra_periodo:
+            save_config(cfg)
+
+        # Migração: regras antigas por mês -> histórico por intervalo de datas
+        if cfg.get("regras_comissao_periodo") and not cfg.get("regras_comissao_historico"):
+            historico_migrado = []
+            for chave_ym, regra_mes in cfg.get("regras_comissao_periodo", {}).items():
+                try:
+                    ano_s, mes_s = str(chave_ym).split("-")
+                    ano_i, mes_i = int(ano_s), int(mes_s)
+                    data_ini = dt.date(ano_i, mes_i, 1)
+                    data_fim = dt.date(ano_i, mes_i, calendar.monthrange(ano_i, mes_i)[1])
+                except:
+                    continue
+                if not isinstance(regra_mes, dict):
+                    continue
+                item = {
+                    "id": str(uuid.uuid4()),
+                    "data_inicio": data_ini.isoformat(),
+                    "data_fim": data_fim.isoformat(),
+                    "created_at": dt.datetime.now().isoformat(timespec="seconds"),
+                }
+                for rk in COMISSAO_RULE_KEYS:
+                    item[rk] = regra_mes.get(rk, cfg["regras_comissao_default"].get(rk))
+                historico_migrado.append(item)
+            cfg["regras_comissao_historico"] = historico_migrado
+            save_config(cfg)
+
         return cfg
     except:
         default["regras_comissao_default"] = default_comissao
         default["regras_comissao_periodo"] = {}
+        default["regras_comissao_historico"] = []
         return default
 
 def save_config(cfg: dict) -> None:
@@ -684,6 +730,137 @@ def metas_prorated_for_window(df_metas: pd.DataFrame, start_date: dt.date, end_d
         return pd.DataFrame(columns=["Polo", "Meta"])
     return pd.concat(rows, ignore_index=True).groupby("Polo", as_index=False).agg(Meta=("Meta", "sum"))
 
+def parse_iso_date(v):
+    try:
+        return dt.date.fromisoformat(str(v))
+    except:
+        return None
+
+def regra_comissao_formatada(regra_raw: dict, regra_default: dict) -> dict:
+    r = dict(regra_default)
+    if isinstance(regra_raw, dict):
+        for k in COMISSAO_RULE_KEYS:
+            if k in regra_raw:
+                r[k] = regra_raw[k]
+    try:
+        r["f1_max"] = int(r["f1_max"]); r["f2_max"] = int(r["f2_max"]); r["f3_max"] = int(r["f3_max"])
+        r["f4_max"] = int(r["f4_max"]); r["f5_min"] = int(r["f5_min"])
+        r["f1_val"] = float(r["f1_val"]); r["f2_val"] = float(r["f2_val"]); r["f3_val"] = float(r["f3_val"])
+        r["f4_val"] = float(r["f4_val"]); r["f5_val"] = float(r["f5_val"])
+    except:
+        return dict(regra_default)
+    return r
+
+def obter_inicio_sistema(df_mc: pd.DataFrame) -> dt.date:
+    if df_mc is None or df_mc.empty:
+        return dt.date(2020, 1, 1)
+    s = pd.to_datetime(df_mc.get("Data"), errors="coerce").dropna()
+    if s.empty:
+        return dt.date(2020, 1, 1)
+    return s.min().date()
+
+def regras_historico_normalizadas(cfg: dict) -> list:
+    # Modelo de linha do tempo: cada regra tem apenas data_inicio.
+    # A data_fim é derivada automaticamente: próximo início - 1 dia.
+    por_inicio = {}
+    for item in cfg.get("regras_comissao_historico", []):
+        if not isinstance(item, dict):
+            continue
+        data_inicio = parse_iso_date(item.get("data_inicio"))
+        if not data_inicio:
+            continue
+        regra_fmt = regra_comissao_formatada(item, cfg["regras_comissao_default"])
+        candidato = {
+            "id": str(item.get("id", str(uuid.uuid4()))),
+            "data_inicio": data_inicio,
+            "created_at": str(item.get("created_at", "")),
+            "regra": regra_fmt,
+        }
+        atual = por_inicio.get(data_inicio)
+        if not atual or candidato["created_at"] >= atual["created_at"]:
+            por_inicio[data_inicio] = candidato
+
+    regras = [por_inicio[k] for k in sorted(por_inicio.keys())]
+    for i, r in enumerate(regras):
+        proximo_inicio = regras[i + 1]["data_inicio"] if i + 1 < len(regras) else None
+        r["data_fim"] = (proximo_inicio - dt.timedelta(days=1)) if proximo_inicio else None
+    return regras
+
+def regra_para_data(data_ref: dt.date, regra_default: dict, regras_hist: list, inicio_sistema: dt.date) -> dict:
+    if not regras_hist:
+        return {
+            "regra": regra_comissao_formatada(regra_default, regra_default),
+            "periodo_label": "Padrão do sistema",
+            "origem": "Padrão",
+            "regra_id": "default",
+        }
+
+    primeira = regras_hist[0]
+    if data_ref < primeira["data_inicio"]:
+        return {
+            "regra": regra_comissao_formatada(regra_default, regra_default),
+            "periodo_label": f"{inicio_sistema.strftime('%d/%m/%Y')} a {(primeira['data_inicio'] - dt.timedelta(days=1)).strftime('%d/%m/%Y')}",
+            "origem": "Padrão",
+            "regra_id": "default",
+        }
+
+    regra_escolhida = None
+    for item in regras_hist:
+        if item["data_inicio"] <= data_ref:
+            regra_escolhida = item
+        else:
+            break
+
+    if regra_escolhida:
+        fim_txt = regra_escolhida["data_fim"].strftime("%d/%m/%Y") if regra_escolhida["data_fim"] else "em vigor"
+        return {
+            "regra": regra_escolhida["regra"],
+            "periodo_label": f"{regra_escolhida['data_inicio'].strftime('%d/%m/%Y')} a {fim_txt}",
+            "origem": "Histórico",
+            "regra_id": regra_escolhida["id"],
+        }
+    return {
+        "regra": regra_comissao_formatada(regra_default, regra_default),
+        "periodo_label": "Padrão do sistema",
+        "origem": "Padrão",
+        "regra_id": "default",
+    }
+
+def faixa_info_por_inscricao(insc: int, regra: dict):
+    if insc <= regra["f1_max"]:
+        return f"0 a {int(regra['f1_max'])} (Não recebe)", 0.0
+    if insc <= regra["f2_max"]:
+        return f"{int(regra['f1_max'] + 1)} a {int(regra['f2_max'])}", float(regra["f2_val"])
+    if insc <= regra["f3_max"]:
+        return f"{int(regra['f2_max'] + 1)} a {int(regra['f3_max'])}", float(regra["f3_val"])
+    if insc <= regra["f4_max"]:
+        return f"{int(regra['f3_max'] + 1)} a {int(regra['f4_max'])}", float(regra["f4_val"])
+    return f"{int(regra['f5_min'])} ou mais", float(regra["f5_val"])
+
+def enriquecer_df_com_regras(df_base: pd.DataFrame, cfg: dict, inicio_sistema: dt.date) -> pd.DataFrame:
+    if df_base.empty:
+        return df_base.copy()
+    regra_default = regra_comissao_formatada(cfg["regras_comissao_default"], cfg["regras_comissao_default"])
+    regras_hist = regras_historico_normalizadas(cfg)
+    out = df_base.copy()
+    out["Data_base"] = pd.to_datetime(out["Data"]).dt.date
+
+    def _resolve_row(row):
+        sel = regra_para_data(row["Data_base"], regra_default, regras_hist, inicio_sistema)
+        faixa_txt, val_por_insc = faixa_info_por_inscricao(int(row["Inscricoes"]), sel["regra"])
+        comissao = float(row["Inscricoes"]) * float(val_por_insc)
+        return pd.Series({
+            "Regra_Periodo": sel["periodo_label"],
+            "Regra_Origem": sel["origem"],
+            "Faixa Atingida": faixa_txt,
+            "Valor por Insc. (R$)": val_por_insc,
+            "Valor_Comissao": comissao,
+            "Regra_ID": sel["regra_id"],
+        })
+
+    extras = out.apply(_resolve_row, axis=1)
+    return pd.concat([out, extras], axis=1)
+
 def calcular_comissao_masterclass(inscricoes: int, regra: dict) -> float:
     """Calcula a comissão baseada nas faixas definidas."""
     if inscricoes <= regra['f1_max']: return inscricoes * regra['f1_val']
@@ -726,7 +903,7 @@ def dialog_detalhes_palestrante(palestrante, df):
     st.dataframe(view_df, hide_index=True, width='stretch')
 
 @st.dialog("📄 Relatório Detalhado de Comissão", width="large")
-def dialog_relatorio_comissao(palestrante, df_mes, regra, mes, ano):
+def dialog_relatorio_comissao(palestrante, df_mes, mes, ano):
     st.markdown(f"### 🎤 {palestrante}")
     st.caption(f"**Mês de Referência:** {mes:02d}/{ano}")
     
@@ -735,24 +912,17 @@ def dialog_relatorio_comissao(palestrante, df_mes, regra, mes, ano):
     if df_pal.empty:
         st.warning("Nenhuma masterclass encontrada para este palestrante no mês selecionado.")
         return
+    if "Regra_Periodo" not in df_pal.columns:
+        df_pal["Regra_Periodo"] = "Padrão do sistema"
+    if "Faixa Atingida" not in df_pal.columns:
+        df_pal["Faixa Atingida"] = "-"
+    if "Valor por Insc. (R$)" not in df_pal.columns:
+        df_pal["Valor por Insc. (R$)"] = 0.0
         
-    def get_faixa_info(insc):
-        if insc <= regra['f1_max']: 
-            return f"0 a {int(regra['f1_max'])} (Não recebe)", 0.0
-        elif insc <= regra['f2_max']: 
-            return f"{int(regra['f1_max']+1)} a {int(regra['f2_max'])}", regra['f2_val']
-        elif insc <= regra['f3_max']: 
-            return f"{int(regra['f2_max']+1)} a {int(regra['f3_max'])}", regra['f3_val']
-        elif insc <= regra['f4_max']: 
-            return f"{int(regra['f3_max']+1)} a {int(regra['f4_max'])}", regra['f4_val']
-        else: 
-            return f"Acima de {int(regra['f4_max'])}", regra['f5_val']
-
-    # Aplicando a função para criar as colunas de detalhamento
-    faixas_e_valores = df_pal["Inscricoes"].apply(lambda x: pd.Series(get_faixa_info(x)))
-    df_pal["Faixa Atingida"] = faixas_e_valores[0]
-    df_pal["Valor por Insc. (R$)"] = faixas_e_valores[1]
-    df_pal["Comissão Total (R$)"] = df_pal["Inscricoes"] * df_pal["Valor por Insc. (R$)"]
+    if "Valor_Comissao" in df_pal.columns:
+        df_pal["Comissão Total (R$)"] = df_pal["Valor_Comissao"]
+    else:
+        df_pal["Comissão Total (R$)"] = 0.0
     
     # Resumo KPIs
     total_comissao = df_pal["Comissão Total (R$)"].sum()
@@ -768,7 +938,7 @@ def dialog_relatorio_comissao(palestrante, df_mes, regra, mes, ano):
     
     st.markdown("---")
     st.markdown("#### 📋 Detalhamento dos Eventos")
-    cols_view = ["Data", "Polo", "Cidade", "Sala", "Inscricoes", "Faixa Atingida", "Valor por Insc. (R$)", "Comissão Total (R$)"]
+    cols_view = ["Data", "Polo", "Cidade", "Sala", "Inscricoes", "Regra_Periodo", "Faixa Atingida", "Valor por Insc. (R$)", "Comissão Total (R$)"]
     view_df = df_pal[cols_view].sort_values("Data", ascending=False).copy()
     
     # Formatando para exibição na tela
@@ -1453,7 +1623,7 @@ def module_metas(df_mt, cfg):
 def module_comissoes(df_mc, cfg):
     section_header("Gestão de Comissões", "Cálculo automático de comissionamento de palestrantes e configuração de regras")
 
-    t_resumo, t_regras = st.tabs(["💰 Resumo Mensal", "⚙️ Regras do Mês"])
+    t_resumo, t_regras = st.tabs(["💰 Resumo Mensal", "🗂️ Regras por Início"])
 
     with t_resumo:
         with st.container(border=True):
@@ -1471,33 +1641,84 @@ def module_comissoes(df_mc, cfg):
                 st.write("")
                 if st.button("Aplicar Filtro", width='stretch'):
                     pass # Só para re-renderizar
-            
-            # Buscar a regra aplicável
-            chave_periodo = f"{ano_com}-{mes_com:02d}"
-            regras_periodo = cfg.get("regras_comissao_periodo", {})
-            regra_ativa = regras_periodo.get(chave_periodo, cfg["regras_comissao_default"])
-            
-            # Filtrar DataFrame
+
             df_com = df_mc.copy()
+            inicio_sistema = obter_inicio_sistema(df_mc)
             if not df_com.empty:
                 df_com = df_com[(df_com["Data_dt"].dt.year == ano_com) & (df_com["Data_dt"].dt.month == mes_com)].copy()
+                df_com = enriquecer_df_com_regras(df_com, cfg, inicio_sistema)
+
+            regra_default = regra_comissao_formatada(cfg["regras_comissao_default"], cfg["regras_comissao_default"])
+            regras_hist = regras_historico_normalizadas(cfg)
+            regras_ref = {"default": regra_default}
+            if regras_hist:
+                fim_padrao = regras_hist[0]["data_inicio"] - dt.timedelta(days=1)
+                labels_ref = {"default": f"Padrão: {inicio_sistema.strftime('%d/%m/%Y')} a {fim_padrao.strftime('%d/%m/%Y')}"}
+            else:
+                labels_ref = {"default": "Padrão do sistema"}
+            for rh in regras_hist:
+                regras_ref[rh["id"]] = rh["regra"]
+                fim_txt = rh["data_fim"].strftime("%d/%m/%Y") if rh["data_fim"] else "em vigor"
+                labels_ref[rh["id"]] = f"{rh['data_inicio'].strftime('%d/%m/%Y')} a {fim_txt}"
             
             col_dash, col_legenda = st.columns([2.5, 1], gap="medium")
             
             with col_legenda:
-                # CARD DE LEGENDA (UI/UX Requirement)
+                regras_no_periodo = []
+                if not df_com.empty and "Regra_ID" in df_com.columns:
+                    regras_no_periodo = list(dict.fromkeys(df_com["Regra_ID"].tolist()))
+                if not regras_no_periodo:
+                    regras_no_periodo = ["default"]
+
+                blocos = []
+                for rid in regras_no_periodo:
+                    rr = regras_ref.get(rid, regra_default)
+                    lbl = labels_ref.get(rid, "Padrão do sistema")
+                    tag = "Padrão" if rid == "default" else "Regra histórica"
+                    tag_bg = "#EEF2FF" if rid == "default" else "#ECFDF3"
+                    tag_color = IAM_ROYAL if rid == "default" else IAM_SUCCESS
+                    blocos.append(
+                        f"""
+                        <div class="mini-item" style="padding: 10px 12px; background: #ffffff; border:1px solid {IAM_G200}; border-radius:12px; margin-bottom:10px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
+                                <div style="font-size:11px; font-weight:800; color:{IAM_BLACK};">{lbl}</div>
+                                <span style="font-size:9px; font-weight:800; color:{tag_color}; background:{tag_bg}; border-radius:999px; padding:3px 8px; white-space:nowrap;">{tag}</span>
+                            </div>
+                            <div style="display:grid; grid-template-columns: 1fr; gap:4px;">
+                                <div style="display:flex; justify-content:space-between; font-size:10px;">
+                                    <span style="color:{IAM_G700}; font-weight:700;">Faixa 1 (até {int(rr['f1_max'])})</span>
+                                    <strong style="color:{IAM_G500};">{fmt_br_money(rr['f1_val'])}</strong>
+                                </div>
+                                <div style="display:flex; justify-content:space-between; font-size:10px;">
+                                    <span style="color:{IAM_G700}; font-weight:700;">Faixa 2 (até {int(rr['f2_max'])})</span>
+                                    <strong style="color:{IAM_G500};">{fmt_br_money(rr['f2_val'])}</strong>
+                                </div>
+                                <div style="display:flex; justify-content:space-between; font-size:10px;">
+                                    <span style="color:{IAM_G700}; font-weight:700;">Faixa 3 (até {int(rr['f3_max'])})</span>
+                                    <strong style="color:{IAM_G500};">{fmt_br_money(rr['f3_val'])}</strong>
+                                </div>
+                                <div style="display:flex; justify-content:space-between; font-size:10px;">
+                                    <span style="color:{IAM_G700}; font-weight:700;">Faixa 4 (até {int(rr['f4_max'])})</span>
+                                    <strong style="color:{IAM_G500};">{fmt_br_money(rr['f4_val'])}</strong>
+                                </div>
+                                <div style="display:flex; justify-content:space-between; font-size:10px;">
+                                    <span style="color:{IAM_G700}; font-weight:700;">Faixa 5 (desde {int(rr['f5_min'])})</span>
+                                    <strong style="color:{IAM_SUCCESS};">{fmt_br_money(rr['f5_val'])}</strong>
+                                </div>
+                            </div>
+                        </div>
+                        """
+                    )
+
                 html_legenda = f"""<div style="background: {IAM_G100}; border: 1px solid {IAM_G200}; border-radius: 16px; padding: 18px;">
                     <div style="font-weight: 850; font-size: 14px; color: {IAM_BLACK}; margin-bottom: 14px; display:flex; align-items:center; gap:8px;">
-                        📌 Regra Ativa <span style="font-size:10px; font-weight:700; color:{IAM_ROYAL}; background:#E0F2FE; padding:3px 8px; border-radius:8px;">{mes_com}/{ano_com}</span>
+                        📌 Regras Aplicadas <span style="font-size:10px; font-weight:700; color:{IAM_ROYAL}; background:#E0F2FE; padding:3px 8px; border-radius:8px;">{mes_com:02d}/{ano_com}</span>
                     </div>
+                    <div style="font-size:10px; color:{IAM_G500}; margin-bottom:10px;">Total de regras usadas no período: <strong style="color:{IAM_BLACK};">{len(regras_no_periodo)}</strong></div>
                     <div class="mini-list">
-                        <div class="mini-item" style="padding: 8px 12px; background: #ffffff;"><span class="mini-name" style="font-size:11px;">Até {int(regra_ativa.get('f1_max', 7))} inscrições</span><strong style="color:{IAM_G500}; font-size:13px;">{fmt_br_money(regra_ativa.get('f1_val', 0.0))}</strong></div>
-                        <div class="mini-item" style="padding: 8px 12px; background: #ffffff;"><span class="mini-name" style="font-size:11px;">De {int(regra_ativa.get('f1_max', 7)+1)} a {int(regra_ativa.get('f2_max', 12))} inscrições</span><strong style="color:{IAM_ROYAL}; font-size:13px;">{fmt_br_money(regra_ativa.get('f2_val', 60.0))}</strong></div>
-                        <div class="mini-item" style="padding: 8px 12px; background: #ffffff;"><span class="mini-name" style="font-size:11px;">De {int(regra_ativa.get('f2_max', 12)+1)} a {int(regra_ativa.get('f3_max', 16))} inscrições</span><strong style="color:{IAM_ROYAL}; font-size:13px;">{fmt_br_money(regra_ativa.get('f3_val', 70.0))}</strong></div>
-                        <div class="mini-item" style="padding: 8px 12px; background: #ffffff;"><span class="mini-name" style="font-size:11px;">De {int(regra_ativa.get('f3_max', 16)+1)} a {int(regra_ativa.get('f4_max', 20))} inscrições</span><strong style="color:{IAM_ROYAL}; font-size:13px;">{fmt_br_money(regra_ativa.get('f4_val', 80.0))}</strong></div>
-                        <div class="mini-item" style="padding: 8px 12px; background: #ffffff;"><span class="mini-name" style="font-size:11px;">Acima de {int(regra_ativa.get('f4_max', 20))} inscrições</span><strong style="color:{IAM_SUCCESS}; font-size:13px;">{fmt_br_money(regra_ativa.get('f5_val', 100.0))}</strong></div>
+                        {''.join(blocos)}
                     </div>
-                    <div style="font-size: 10px; color: {IAM_G500}; margin-top: 12px; line-height:1.4;">*O valor da comissão é calculado multiplicando as inscrições da masterclass pelo valor da faixa atingida.</div>
+                    <div style="font-size: 10px; color: {IAM_G500}; margin-top: 12px; line-height:1.4;">*Cada masterclass usa a regra vigente na data do treinamento.</div>
                 </div>"""
                 render_html(html_legenda)
 
@@ -1505,9 +1726,6 @@ def module_comissoes(df_mc, cfg):
                 if df_com.empty:
                     render_html(render_empty_state("Nenhuma masterclass registrada neste mês.", "💰"))
                 else:
-                    # Aplica o cálculo linha a linha (Masterclass a Masterclass)
-                    df_com["Valor_Comissao"] = df_com["Inscricoes"].apply(lambda x: calcular_comissao_masterclass(x, regra_ativa))
-                    
                     comissoes_totais = df_com["Valor_Comissao"].sum()
                     
                     render_html(f"""
@@ -1546,82 +1764,230 @@ def module_comissoes(df_mc, cfg):
                         with c5:
                             # O Botão aciona o Diálogo detalhado do palestrante (sem width stretch para ficar pequeno)
                             if st.button("Detalhar", key=f"btn_det_{row['Palestrante']}_{mes_com}_{ano_com}"):
-                                dialog_relatorio_comissao(row['Palestrante'], df_com, regra_ativa, mes_com, ano_com)
+                                dialog_relatorio_comissao(row['Palestrante'], df_com, mes_com, ano_com)
                         st.markdown("<hr style='margin:0; border-color:var(--iam-g100);'>", unsafe_allow_html=True)
 
     with t_regras:
         with st.container(border=True):
-            st.markdown("#### Sobrescrever Regras para um Mês Específico")
-            st.caption("Se você alterar os valores abaixo, a nova regra valerá **apenas** para o mês e ano selecionados. Os outros meses continuarão usando a regra padrão do sistema.")
+            st.markdown("#### Criar Regra por Data de Início")
+            st.caption("A regra nova começa na data informada. A regra anterior passa a valer até o dia anterior automaticamente.")
             
             with st.form("form_regras_comissao"):
                 c1, c2, c3 = st.columns([1, 1, 2], gap="large")
                 with c1:
-                    mes_regra = st.selectbox("Mês", list(range(1, 13)), key="mr")
+                    data_ini = st.date_input("Data Início da Regra", dt.date.today(), format="DD/MM/YYYY", key="r_data_ini")
                 with c2:
-                    ano_regra = st.number_input("Ano", min_value=2020, value=dt.date.today().year, key="ar")
+                    st.caption("Sem data fim manual: será definida automaticamente.")
                 
                 st.markdown("---")
-                
-                chave_edit = f"{ano_regra}-{mes_regra:02d}"
-                is_custom = chave_edit in cfg.get("regras_comissao_periodo", {})
-                regra_edit = cfg.get("regras_comissao_periodo", {}).get(chave_edit, cfg["regras_comissao_default"])
-                
-                if is_custom:
-                    st.warning(f"⚠️ Atenção: Você está editando uma regra já customizada para {mes_regra}/{ano_regra}.")
-                else:
-                    st.info(f"💡 Você está vendo a regra padrão. Ao salvar, criará uma exceção para {mes_regra}/{ano_regra}.")
+                regra_edit = cfg["regras_comissao_default"]
+                _f4_default = int(regra_edit.get("f4_max", 20))
+                _f5_default = int(regra_edit.get("f5_min", _f4_default + 1))
+                fa1, fa2, fa3, fa4, fa5 = st.columns(5, gap="small")
+                with fa1:
+                    st.markdown("##### Faixa 1")
+                    f1_max = st.number_input(
+                        "Limite de inscrições (inclusive)",
+                        value=int(regra_edit.get("f1_max", 7)),
+                        min_value=0,
+                        step=1,
+                        help="Teto desta faixa: com até este número de inscrições aplica-se o valor ao lado.",
+                        key="rc_new_f1_max",
+                    )
+                    f1_val = st.number_input(
+                        "Valor por inscrição (R$)",
+                        value=float(regra_edit.get("f1_val", 0.0)),
+                        min_value=0.0,
+                        step=1.0,
+                        key="rc_new_f1_val",
+                    )
+                    st.caption(f"Escopo: **0** a **{f1_max}** inscrições.")
+                with fa2:
+                    st.markdown("##### Faixa 2")
+                    f2_max = st.number_input(
+                        "Limite de inscrições (inclusive)",
+                        value=int(regra_edit.get("f2_max", 12)),
+                        min_value=0,
+                        step=1,
+                        key="rc_new_f2_max",
+                    )
+                    f2_val = st.number_input(
+                        "Valor por inscrição (R$)",
+                        value=float(regra_edit.get("f2_val", 60.0)),
+                        min_value=0.0,
+                        step=1.0,
+                        key="rc_new_f2_val",
+                    )
+                    st.caption(f"Escopo: **{f1_max + 1}** a **{f2_max}** inscrições.")
+                with fa3:
+                    st.markdown("##### Faixa 3")
+                    f3_max = st.number_input(
+                        "Limite de inscrições (inclusive)",
+                        value=int(regra_edit.get("f3_max", 16)),
+                        min_value=0,
+                        step=1,
+                        key="rc_new_f3_max",
+                    )
+                    f3_val = st.number_input(
+                        "Valor por inscrição (R$)",
+                        value=float(regra_edit.get("f3_val", 70.0)),
+                        min_value=0.0,
+                        step=1.0,
+                        key="rc_new_f3_val",
+                    )
+                    st.caption(f"Escopo: **{f2_max + 1}** a **{f3_max}** inscrições.")
+                with fa4:
+                    st.markdown("##### Faixa 4")
+                    f4_max = st.number_input(
+                        "Limite de inscrições (inclusive)",
+                        value=_f4_default,
+                        min_value=0,
+                        step=1,
+                        key="rc_new_f4_max",
+                    )
+                    f4_val = st.number_input(
+                        "Valor por inscrição (R$)",
+                        value=float(regra_edit.get("f4_val", 80.0)),
+                        min_value=0.0,
+                        step=1.0,
+                        key="rc_new_f4_val",
+                    )
+                    st.caption(f"Escopo: **{f3_max + 1}** a **{f4_max}** inscrições.")
+                with fa5:
+                    st.markdown("##### Faixa 5")
+                    f5_min = st.number_input(
+                        "Primeira inscrição da faixa 5 (inclusive)",
+                        value=_f5_default,
+                        min_value=max(1, f4_max + 1),
+                        step=1,
+                        help="Deve ser o limite da faixa 4 mais 1, sem buracos entre as faixas.",
+                        key="rc_new_f5_min",
+                    )
+                    f5_val = st.number_input(
+                        "Valor por inscrição (R$)",
+                        value=float(regra_edit.get("f5_val", regra_edit.get("f6_val", 100.0))),
+                        min_value=0.0,
+                        step=1.0,
+                        key="rc_new_f5_val",
+                    )
+                    st.caption(f"Escopo: **{f5_min}** ou mais inscrições.")
 
-                r1, r2, r3 = st.columns(3)
-                with r1:
-                    f1_max = st.number_input("Até X Inscrições (Faixa 1)", value=int(regra_edit.get('f1_max', 7)), min_value=0, step=1)
-                    f1_val = st.number_input("Valor R$ por inscrição (F1)", value=float(regra_edit.get('f1_val', 0.0)), min_value=0.0, step=1.0)
-                    st.write("")
-                    f2_max = st.number_input("Até X Inscrições (Faixa 2)", value=int(regra_edit.get('f2_max', 12)), min_value=0, step=1)
-                    f2_val = st.number_input("Valor R$ por inscrição (F2)", value=float(regra_edit.get('f2_val', 60.0)), min_value=0.0, step=1.0)
-                with r2:
-                    f3_max = st.number_input("Até X Inscrições (Faixa 3)", value=int(regra_edit.get('f3_max', 16)), min_value=0, step=1)
-                    f3_val = st.number_input("Valor R$ por inscrição (F3)", value=float(regra_edit.get('f3_val', 70.0)), min_value=0.0, step=1.0)
-                    st.write("")
-                    f4_max = st.number_input("Até X Inscrições (Faixa 4)", value=int(regra_edit.get('f4_max', 20)), min_value=0, step=1)
-                    f4_val = st.number_input("Valor R$ por inscrição (F4)", value=float(regra_edit.get('f4_val', 80.0)), min_value=0.0, step=1.0)
-                with r3:
-                    st.write("")
-                    st.markdown(f"**Acima de {f4_max} Inscrições (Faixa 5)**")
-                    f5_val = st.number_input("Valor R$ por inscrição (F5)", value=float(regra_edit.get('f5_val', regra_edit.get('f6_val', 100.0))), min_value=0.0, step=1.0)
+                st.caption(
+                    f"Conferência: faixa 4 = **{f3_max + 1}**–**{f4_max}** inscrições; faixa 5 a partir de **{f5_min}** "
+                    f"(esperado **{f4_max + 1}** = início da faixa 5)."
+                )
 
                 st.write("")
-                col_btn1, col_btn2, _ = st.columns([2, 2, 4])
+                col_btn1, _ = st.columns([2, 6])
                 with col_btn1:
-                    submit_regra = st.form_submit_button("💾 Salvar Regra para o Mês", type="primary", width='stretch')
-                with col_btn2:
-                    restore_regra = st.form_submit_button("🔄 Restaurar Padrão do Sistema", type="secondary", width='stretch')
+                    submit_regra = st.form_submit_button("💾 Salvar Regra a Partir da Data", type="primary", width='stretch')
                 
                 if submit_regra:
-                    if f1_max >= f2_max or f2_max >= f3_max or f3_max >= f4_max:
-                        st.error("Erro: Os limites (X Inscrições) devem ser crescentes!")
+                    lim_ok = f1_max < f2_max < f3_max < f4_max < f5_min
+                    val_ok = f1_val < f2_val < f3_val < f4_val < f5_val
+                    encosta = f5_min == f4_max + 1
+                    if not lim_ok:
+                        st.error(
+                            "Limites de inscrições: cada faixa precisa ter limite **estritamente menor** que o da seguinte "
+                            "(faixa 1 < faixa 2 < faixa 3 < faixa 4 < início da faixa 5)."
+                        )
+                    elif not val_ok:
+                        st.error(
+                            "Valores (R$): cada faixa precisa ter valor por inscrição **estritamente menor** que o da faixa seguinte."
+                        )
+                    elif not encosta:
+                        st.error(
+                            "A primeira inscrição da faixa 5 deve ser **exatamente** o limite da faixa 4 + 1 "
+                            f"(neste caso, **{f4_max + 1}**)."
+                        )
                     else:
+                        novas_regras = cfg.setdefault("regras_comissao_historico", [])
+                        novo_ini = data_ini
+                        regras_norm = regras_historico_normalizadas(cfg)
+
+                        # Se já existe regra com mesmo início, substitui.
+                        mesmo_inicio = None
+                        for rr in regras_norm:
+                            if rr["data_inicio"] == novo_ini:
+                                mesmo_inicio = rr["id"]
+                                break
+                        if mesmo_inicio:
+                            novas_regras = [x for x in novas_regras if str(x.get("id")) != str(mesmo_inicio)]
+                            cfg["regras_comissao_historico"] = novas_regras
+
                         nova_regra = {
+                            "id": str(uuid.uuid4()),
+                            "data_inicio": novo_ini.isoformat(),
+                            "created_at": dt.datetime.now().isoformat(timespec="seconds"),
                             "f1_max": f1_max, "f1_val": f1_val,
                             "f2_max": f2_max, "f2_val": f2_val,
                             "f3_max": f3_max, "f3_val": f3_val,
                             "f4_max": f4_max, "f4_val": f4_val,
-                            "f5_val": f5_val
+                            "f5_min": f5_min,
+                            "f5_val": f5_val,
                         }
-                        cfg.setdefault("regras_comissao_periodo", {})[chave_edit] = nova_regra
+                        novas_regras.append(nova_regra)
+                        novas_regras.sort(key=lambda x: str(x.get("data_inicio", "")))
                         save_config(cfg)
-                        audit("Regra de Comissão Alterada", f"Período: {chave_edit}")
-                        ok_modal(f"Regra customizada para {mes_regra}/{ano_regra} salva com sucesso!")
-                
-                if restore_regra:
-                    rp = cfg.setdefault("regras_comissao_periodo", {})
-                    if chave_edit in rp:
-                        del rp[chave_edit]
-                        save_config(cfg)
-                        audit("Regra de Comissão Restaurada", f"Período: {chave_edit} voltou ao padrão")
-                        ok_modal(f"O mês {mes_regra}/{ano_regra} voltou a usar a regra padrão do sistema.")
-                    else:
-                        st.warning("Este mês já está usando a regra padrão do sistema.")
+                        audit("Regra de Comissão por Início", f"Regra iniciada em {novo_ini.isoformat()}")
+                        ok_modal(
+                            f"Regra salva com início em {novo_ini.strftime('%d/%m/%Y')}. "
+                            "A regra anterior passa a terminar no dia anterior automaticamente."
+                        )
+
+            st.markdown("---")
+            st.markdown("#### Histórico de Regras")
+            hist = regras_historico_normalizadas(cfg)
+            if not hist:
+                st.info("Nenhuma regra por data de início cadastrada. O sistema está usando apenas a regra padrão.")
+            else:
+                rows = []
+                inicio_sis_hist = obter_inicio_sistema(df_mc)
+                fim_padrao_hist = hist[0]["data_inicio"] - dt.timedelta(days=1)
+                if inicio_sis_hist <= fim_padrao_hist:
+                    rows.append({
+                        "ID": "default",
+                        "Período": f"{inicio_sis_hist.strftime('%d/%m/%Y')} a {fim_padrao_hist.strftime('%d/%m/%Y')}",
+                        "F1": f"até {cfg['regras_comissao_default']['f1_max']} ({fmt_br_money(cfg['regras_comissao_default']['f1_val'])})",
+                        "F2": f"até {cfg['regras_comissao_default']['f2_max']} ({fmt_br_money(cfg['regras_comissao_default']['f2_val'])})",
+                        "F3": f"até {cfg['regras_comissao_default']['f3_max']} ({fmt_br_money(cfg['regras_comissao_default']['f3_val'])})",
+                        "F4": f"até {cfg['regras_comissao_default']['f4_max']} ({fmt_br_money(cfg['regras_comissao_default']['f4_val'])})",
+                        "F5": f"desde {cfg['regras_comissao_default']['f5_min']} ({fmt_br_money(cfg['regras_comissao_default']['f5_val'])})",
+                    })
+                for h in hist:
+                    r = h["regra"]
+                    fim_txt = h["data_fim"].strftime('%d/%m/%Y') if h["data_fim"] else "em vigor"
+                    rows.append({
+                        "ID": h["id"],
+                        "Período": f"{h['data_inicio'].strftime('%d/%m/%Y')} a {fim_txt}",
+                        "F1": f"até {r['f1_max']} ({fmt_br_money(r['f1_val'])})",
+                        "F2": f"até {r['f2_max']} ({fmt_br_money(r['f2_val'])})",
+                        "F3": f"até {r['f3_max']} ({fmt_br_money(r['f3_val'])})",
+                        "F4": f"até {r['f4_max']} ({fmt_br_money(r['f4_val'])})",
+                        "F5": f"desde {r['f5_min']} ({fmt_br_money(r['f5_val'])})",
+                    })
+                st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch')
+
+                opcoes = {
+                    f"{h['data_inicio'].strftime('%d/%m/%Y')} a {(h['data_fim'].strftime('%d/%m/%Y') if h['data_fim'] else 'em vigor')} | ID {h['id'][:8]}": h["id"]
+                    for h in hist
+                }
+                cdel1, cdel2 = st.columns([3, 1], gap="small")
+                with cdel1:
+                    regra_del_lbl = st.selectbox("Selecione uma regra histórica para excluir", list(opcoes.keys()), key="regra_del_lbl")
+                with cdel2:
+                    st.write("")
+                    if st.button("🗑️ Excluir Regra", type="secondary", width='stretch'):
+                        regra_del_id = opcoes.get(regra_del_lbl)
+                        antes = len(cfg.get("regras_comissao_historico", []))
+                        cfg["regras_comissao_historico"] = [x for x in cfg.get("regras_comissao_historico", []) if str(x.get("id")) != str(regra_del_id)]
+                        depois = len(cfg.get("regras_comissao_historico", []))
+                        if depois < antes:
+                            save_config(cfg)
+                            audit("Exclusão de Regra de Comissão", f"Regra removida: {regra_del_id}")
+                            ok_modal("Regra histórica excluída com sucesso.")
+                        else:
+                            st.warning("Não foi possível localizar a regra selecionada.")
 
 def module_agenda(df_mc, cfg):
     section_header("Agenda de Masterclasses", "Visão cronológica dos eventos agendados e realizados")
