@@ -1409,6 +1409,8 @@ def module_dashboard(df_mc, df_mt, cfg):
             view = view.rename(columns={"Meta": "Projetado"})
             proj = pd.to_numeric(view["Projetado"], errors="coerce").fillna(0)
             real = pd.to_numeric(view["Realizado"], errors="coerce").fillna(0)
+            view["Projetado"] = proj.astype(float)
+            view["Realizado"] = real.astype(float)
             view["Atingimento"] = np.divide(
                 real.to_numpy(dtype=float),
                 proj.to_numpy(dtype=float),
