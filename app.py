@@ -1172,8 +1172,13 @@ def module_dashboard(df_mc, df_mt, cfg):
             </div>""")
 
             real_polo = df_f.groupby("Polo", as_index=False).agg(Realizado=("Inscricoes", "sum")) if not df_f.empty else pd.DataFrame(columns=["Polo", "Realizado"])
-            view = metas_periodo.merge(real_polo, on="Polo", how="outer").fillna(0)
+            view = metas_periodo.merge(real_polo, on="Polo", how="outer")
             view = view.rename(columns={"Meta": "Projetado"})
+
+            # Garante tipos homogêneos para o Plotly em modo wide-form.
+            view["Polo"] = view["Polo"].fillna("Sem Polo")
+            view["Projetado"] = pd.to_numeric(view.get("Projetado"), errors="coerce").fillna(0).astype(float)
+            view["Realizado"] = pd.to_numeric(view.get("Realizado"), errors="coerce").fillna(0).astype(float)
             view["Atingimento"] = np.where(view["Projetado"] > 0, (view["Realizado"] / view["Projetado"] * 100), 0)
             view = view.sort_values("Atingimento", ascending=False)
 
