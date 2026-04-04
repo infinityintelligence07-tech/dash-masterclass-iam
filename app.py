@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 import calendar
 import base64
 import urllib.parse
+import requests
 
 # =========================================================
 # 1. CONFIGURAÇÕES GERAIS E CONSTANTES
@@ -94,6 +95,66 @@ DEFAULT_PALESTRANTES = [
     "Guilherme", "Vinicius", "Pedro", "Palestrante", "Michelle", "Natalia", "Cassi",
     "Jaquiele", "Ygor", "Bia", "Ezequiel", "Isabella"
 ]
+
+# =========================================================
+# 1.5. SUPABASE CONFIGURATION
+# =========================================================
+SUPABASE_URL = "https://omjqpblyjzbaryrsbhco.supabase.co"
+SUPABASE_KEY = "sb_publishable_SrbvclPeSfhqSYGY-pufdw_CXG_bhDk"
+TENANT_UUID = "00000000-0000-0000-0000-000000000001"
+
+def _sb_headers():
+    return {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
+    }
+
+def _sb_get(table, params=None):
+    """GET request to Supabase REST API"""
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/{table}", headers=_sb_headers(), params=params or {})
+    r.raise_for_status()
+    return r.json()
+
+def _sb_post(table, data):
+    """POST (insert) to Supabase REST API"""
+    h = _sb_headers()
+    r = requests.post(f"{SUPABASE_URL}/rest/v1/{table}", headers=h, json=data)
+    r.raise_for_status()
+    return r.json()
+
+def _sb_patch(table, data, params):
+    """PATCH (update) to Supabase REST API"""
+    h = _sb_headers()
+    r = requests.patch(f"{SUPABASE_URL}/rest/v1/{table}", headers=h, json=data, params=params)
+    r.raise_for_status()
+    return r.json()
+
+def _sb_delete(table, params):
+    """DELETE from Supabase REST API"""
+    r = requests.delete(f"{SUPABASE_URL}/rest/v1/{table}", headers=_sb_headers(), params=params)
+    r.raise_for_status()
+    return r.json() if r.text else []
+
+@st.cache_data(ttl=300)
+def _load_lookup_tables():
+    """Load polo, cidade, and palestrante lookup tables for ID mapping"""
+    # Polos: nome -> id
+    polos_data = _sb_get("polos", {"tenant_id": f"eq.{TENANT_UUID}", "select": "id,nome"})
+    polos = {r["nome"]: r["id"] for r in polos_data}
+
+    # Cidades: (polo_id, nome) -> id
+    cidades_raw = _sb_get("cidades", {"select": "id,nome,polo_id"})
+    cidades = {}
+    for c in cidades_raw:
+        cidades[(c["polo_id"], c["nome"])] = c["id"]
+
+    # Palestrantes: nome -> id
+    pals_data = _sb_get("palestrantes", {"tenant_id": f"eq.{TENANT_UUID}", "select": "id,nome"})
+    pals = {r["nome"]: r["id"] for r in pals_data}
+
+    return polos, cidades, pals
 
 # =========================================================
 # 2. UI/UX E DESIGN SYSTEM
@@ -484,38 +545,15 @@ def apply_plotly_theme(fig):
 # 4. CAMADA DE DADOS
 # =========================================================
 def _atomic_write_csv(path: str, df: pd.DataFrame) -> None:
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(prefix=".tmp_", suffix=".csv", dir=os.path.dirname(path) or ".")
-    os.close(fd)
-    try:
-        df.to_csv(tmp_path, index=False, sep=",", encoding=CSV_ENCODING)
-        os.replace(tmp_path, path)
-    finally:
-        if os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except:
-                pass
+    """Deprecated: CSV writing no longer used with Supabase backend"""
+    pass
 
 def _read_csv_safe(path: str) -> pd.DataFrame:
-    if not os.path.exists(path):
-        return pd.DataFrame()
-    try:
-        df = pd.read_csv(path, sep=",", encoding=CSV_ENCODING)
-        df.columns = [str(c).strip().replace("\ufeff", "") for c in df.columns]
-        return df
-    except:
-        return pd.DataFrame()
+    """Deprecated: CSV reading no longer used with Supabase backend"""
+    return pd.DataFrame()
 
 def load_config() -> dict:
-    default = {
-        "empresa": "IAM",
-        "polos": DEFAULT_POLOS,
-        "cidades_rel": DEFAULT_CIDADES_REL,
-        "palestrantes": DEFAULT_PALESTRANTES
-    }
-    
-    # Nova Regra de Comissões (5 Faixas conforme diretriz do usuário)
+    """Load configuration from Supabase database"""
     default_comissao = {
         "f1_max": 7, "f1_val": 0.0,
         "f2_max": 12, "f2_val": 60.0,
@@ -525,110 +563,193 @@ def load_config() -> dict:
         "f5_val": 100.0,
     }
 
-    if not os.path.exists(CONFIG_FILE):
-        default["regras_comissao_default"] = default_comissao
-        default["regras_comissao_periodo"] = {}
-        default["regras_comissao_historico"] = []
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(default, f, ensure_ascii=False, indent=2)
-        return default
     try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-        if "cidades_rel" not in cfg or not isinstance(cfg["cidades_rel"], dict) or not cfg["cidades_rel"]:
-            cfg["cidades_rel"] = default["cidades_rel"].copy()
-        for p, c_list in default["cidades_rel"].items():
-            if p not in cfg["cidades_rel"]: cfg["cidades_rel"][p] = c_list
-        for k, v in default.items():
-            if k not in cfg: cfg[k] = v
-        for p in cfg.get("polos", []):
-            if p not in cfg["cidades_rel"]: cfg["cidades_rel"][p] = []
-        for p in list(cfg["cidades_rel"].keys()):
-            cfg["cidades_rel"][p] = sorted(list({str(x).strip().upper() for x in cfg["cidades_rel"][p] if str(x).strip()}))
-        cfg["polos"] = sorted(list({str(x).strip() for x in cfg.get("polos", []) if str(x).strip()}))
-        cfg["palestrantes"] = sorted(list({str(x).strip() for x in cfg.get("palestrantes", []) if str(x).strip()}))
-        
-        if "regras_comissao_default" not in cfg or not isinstance(cfg.get("regras_comissao_default"), dict):
-            cfg["regras_comissao_default"] = default_comissao.copy()
-        if "regras_comissao_periodo" not in cfg or not isinstance(cfg.get("regras_comissao_periodo"), dict):
-            cfg["regras_comissao_periodo"] = {}
-        if "regras_comissao_historico" not in cfg or not isinstance(cfg.get("regras_comissao_historico"), list):
-            cfg["regras_comissao_historico"] = []
-        
-        # Migração automática para o padrão de 5 faixas, se o arquivo antigo tiver 6 faixas
-        if "regras_comissao_default" not in cfg or "f6_val" in cfg["regras_comissao_default"]:
-            cfg["regras_comissao_default"] = default_comissao
-            if "regras_comissao_periodo" in cfg:
-                for k, v in list(cfg["regras_comissao_periodo"].items()):
-                    if "f6_val" in v:
-                        cfg["regras_comissao_periodo"][k] = {
-                            "f1_max": 7, "f1_val": 0.0,
-                            "f2_max": 12, "f2_val": 60.0,
-                            "f3_max": 16, "f3_val": 70.0,
-                            "f4_max": 20, "f4_val": 80.0,
-                            "f5_min": 21,
-                            "f5_val": v.get("f6_val", 100.0),
-                        }
-            save_config(cfg)
+        # Fetch tenant info
+        tenant_data = _sb_get("tenants", {"id": f"eq.{TENANT_UUID}", "select": "nome,produto"})
+        if not tenant_data:
+            return {
+                "empresa": "IAM",
+                "produto": "",
+                "polos": DEFAULT_POLOS,
+                "cidades_rel": DEFAULT_CIDADES_REL,
+                "palestrantes": DEFAULT_PALESTRANTES,
+                "regras_comissao_default": default_comissao,
+                "regras_comissao_periodo": {},
+                "regras_comissao_historico": [],
+            }
 
-        # f5_min: início inclusivo da faixa 5 (faixa 4 = f3_max < insc < f5_min)
-        rc_def = cfg.get("regras_comissao_default")
-        if isinstance(rc_def, dict) and "f5_min" not in rc_def:
-            rc_def["f5_min"] = int(rc_def.get("f4_max", 20)) + 1
-            save_config(cfg)
-        rc_per = cfg.get("regras_comissao_periodo", {})
-        migra_periodo = False
-        for _pk, rv in list(rc_per.items()):
-            if isinstance(rv, dict) and "f5_min" not in rv:
-                rv["f5_min"] = int(rv.get("f4_max", 20)) + 1
-                migra_periodo = True
-        if migra_periodo:
-            save_config(cfg)
+        tenant = tenant_data[0]
 
-        # Migração: regras antigas por mês -> histórico por intervalo de datas
-        if cfg.get("regras_comissao_periodo") and not cfg.get("regras_comissao_historico"):
-            historico_migrado = []
-            for chave_ym, regra_mes in cfg.get("regras_comissao_periodo", {}).items():
-                try:
-                    ano_s, mes_s = str(chave_ym).split("-")
-                    ano_i, mes_i = int(ano_s), int(mes_s)
-                    data_ini = dt.date(ano_i, mes_i, 1)
-                    data_fim = dt.date(ano_i, mes_i, calendar.monthrange(ano_i, mes_i)[1])
-                except:
-                    continue
-                if not isinstance(regra_mes, dict):
-                    continue
-                item = {
-                    "id": str(uuid.uuid4()),
-                    "data_inicio": data_ini.isoformat(),
-                    "data_fim": data_fim.isoformat(),
-                    "created_at": dt.datetime.now().isoformat(timespec="seconds"),
-                }
-                for rk in COMISSAO_RULE_KEYS:
-                    item[rk] = regra_mes.get(rk, cfg["regras_comissao_default"].get(rk))
-                historico_migrado.append(item)
-            cfg["regras_comissao_historico"] = historico_migrado
-            save_config(cfg)
+        # Fetch polos
+        polos_data = _sb_get("polos", {"tenant_id": f"eq.{TENANT_UUID}", "select": "id,nome"})
+        polos = sorted([p["nome"] for p in polos_data])
 
-        return cfg
-    except:
-        default["regras_comissao_default"] = default_comissao
-        default["regras_comissao_periodo"] = {}
-        default["regras_comissao_historico"] = []
-        return default
+        # Fetch cities grouped by polo
+        cidades_raw = _sb_get("cidades", {"select": "id,nome,polo_id"})
+        cidades_rel = {}
+        for p in polos:
+            polo_id_match = next((p_data["id"] for p_data in polos_data if p_data["nome"] == p), None)
+            if polo_id_match:
+                cidades_rel[p] = sorted([c["nome"] for c in cidades_raw if c["polo_id"] == polo_id_match])
+            else:
+                cidades_rel[p] = []
+
+        # Fetch palestrantes
+        pals_data = _sb_get("palestrantes", {"tenant_id": f"eq.{TENANT_UUID}", "select": "id,nome"})
+        palestrantes = sorted([p["nome"] for p in pals_data])
+
+        # Fetch default commission rules
+        regras_default_data = _sb_get("regras_comissao_default", {"tenant_id": f"eq.{TENANT_UUID}", "select": "*"})
+        regras_comissao_default = default_comissao.copy()
+        if regras_default_data:
+            r = regras_default_data[0]
+            for key in COMISSAO_RULE_KEYS:
+                if key in r:
+                    regras_comissao_default[key] = r[key]
+
+        # Fetch historical commission rules
+        regras_hist_data = _sb_get("regras_comissao_historico", {"tenant_id": f"eq.{TENANT_UUID}", "select": "*"})
+        regras_comissao_historico = []
+        for r in regras_hist_data:
+            item = {
+                "id": r.get("id"),
+                "data_inicio": r.get("data_inicio"),
+                "created_at": r.get("created_at", ""),
+            }
+            for key in COMISSAO_RULE_KEYS:
+                if key in r:
+                    item[key] = r[key]
+            regras_comissao_historico.append(item)
+
+        return {
+            "empresa": tenant.get("nome", "IAM"),
+            "produto": tenant.get("produto", ""),
+            "polos": polos,
+            "cidades_rel": cidades_rel,
+            "palestrantes": palestrantes,
+            "regras_comissao_default": regras_comissao_default,
+            "regras_comissao_periodo": {},
+            "regras_comissao_historico": regras_comissao_historico,
+        }
+    except Exception as e:
+        st.error(f"Erro ao carregar configuração do Supabase: {str(e)}")
+        return {
+            "empresa": "IAM",
+            "produto": "",
+            "polos": DEFAULT_POLOS,
+            "cidades_rel": DEFAULT_CIDADES_REL,
+            "palestrantes": DEFAULT_PALESTRANTES,
+            "regras_comissao_default": default_comissao,
+            "regras_comissao_periodo": {},
+            "regras_comissao_historico": [],
+        }
 
 def save_config(cfg: dict) -> None:
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    """Save configuration changes to Supabase database"""
+    try:
+        # Get current polos from DB
+        polos_data = _sb_get("polos", {"tenant_id": f"eq.{TENANT_UUID}", "select": "id,nome"})
+        existing_polos = {p["nome"]: p["id"] for p in polos_data}
+
+        # Add new polos
+        for polo_name in cfg.get("polos", []):
+            if polo_name not in existing_polos:
+                result = _sb_post("polos", {"tenant_id": TENANT_UUID, "nome": polo_name})
+                if result:
+                    existing_polos[polo_name] = result[0]["id"]
+
+        # Get current cidades from DB
+        cidades_raw = _sb_get("cidades", {"select": "id,nome,polo_id"})
+        existing_cidades = {(c["polo_id"], c["nome"]): c["id"] for c in cidades_raw}
+
+        # Add new cidades
+        for polo_name, cidades_list in cfg.get("cidades_rel", {}).items():
+            polo_id = existing_polos.get(polo_name)
+            if polo_id:
+                for cidade_name in cidades_list:
+                    if (polo_id, cidade_name) not in existing_cidades:
+                        _sb_post("cidades", {"polo_id": polo_id, "nome": cidade_name})
+
+        # Get current palestrantes from DB
+        pals_data = _sb_get("palestrantes", {"tenant_id": f"eq.{TENANT_UUID}", "select": "id,nome"})
+        existing_pals = {p["nome"]: p["id"] for p in pals_data}
+
+        # Add new palestrantes
+        for pal_name in cfg.get("palestrantes", []):
+            if pal_name not in existing_pals:
+                _sb_post("palestrantes", {"tenant_id": TENANT_UUID, "nome": pal_name})
+
+        # Update default commission rules
+        regras_default_data = _sb_get("regras_comissao_default", {"tenant_id": f"eq.{TENANT_UUID}", "select": "id"})
+        regra_update = {}
+        for key in COMISSAO_RULE_KEYS:
+            if key in cfg.get("regras_comissao_default", {}):
+                regra_update[key] = cfg["regras_comissao_default"][key]
+
+        if regras_default_data:
+            # Update existing
+            _sb_patch("regras_comissao_default", regra_update, {"tenant_id": f"eq.{TENANT_UUID}"})
+        else:
+            # Create new
+            regra_update["tenant_id"] = TENANT_UUID
+            _sb_post("regras_comissao_default", regra_update)
+
+        # ---- Sync regras_comissao_historico ----
+        hist_cfg = cfg.get("regras_comissao_historico", [])
+
+        # Get existing historico IDs from DB
+        existing_hist = _sb_get("regras_comissao_historico", {
+            "tenant_id": f"eq.{TENANT_UUID}",
+            "select": "id"
+        })
+        existing_hist_ids = {str(r["id"]) for r in existing_hist}
+
+        # IDs that should exist according to cfg
+        cfg_hist_ids = {str(item.get("id")) for item in hist_cfg if item.get("id")}
+
+        # Delete rules that were removed from cfg
+        ids_to_delete = existing_hist_ids - cfg_hist_ids
+        for del_id in ids_to_delete:
+            _sb_delete("regras_comissao_historico", {"id": f"eq.{del_id}"})
+
+        # Upsert rules from cfg (insert new, update existing)
+        for item in hist_cfg:
+            item_id = str(item.get("id", ""))
+            if not item_id:
+                continue
+            row = {
+                "id": item_id,
+                "tenant_id": TENANT_UUID,
+                "data_inicio": str(item.get("data_inicio", "")),
+            }
+            for key in COMISSAO_RULE_KEYS:
+                if key in item:
+                    row[key] = item[key]
+
+            if item_id in existing_hist_ids:
+                # Update existing
+                _sb_patch("regras_comissao_historico", row, {"id": f"eq.{item_id}"})
+            else:
+                # Insert new
+                _sb_post("regras_comissao_historico", row)
+
+        # Clear lookup caches after config change
+        _load_lookup_tables.clear()
+
+    except Exception as e:
+        st.error(f"Erro ao salvar configuração: {str(e)}")
 
 def audit(action: str, details: str = "", records: int = 0):
-    ts = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    row = pd.DataFrame([{"Timestamp": ts, "Tenant": TENANT_ID, "Acao": action, "Detalhes": details, "Registros": int(records)}])
-    df_a = _read_csv_safe(AUDIT_FILE)
-    if df_a.empty:
-        df_a = pd.DataFrame(columns=AUDIT_COLS)
-    df_a = pd.concat([df_a, row], ignore_index=True).tail(5000)
-    _atomic_write_csv(AUDIT_FILE, df_a)
+    """Log an action to the audit log in Supabase"""
+    try:
+        _sb_post("audit_log", {
+            "tenant_id": TENANT_UUID,
+            "acao": action,
+            "detalhes": details,
+            "registros": int(records),
+        })
+    except Exception as e:
+        st.warning(f"Aviso: Não foi possível registrar no audit log: {str(e)}")
 
 def validate_masterclass_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
@@ -675,22 +796,134 @@ def validate_metas_df(df: pd.DataFrame) -> pd.DataFrame:
     df = df[df["Tenant"] == TENANT_ID]
     return df.sort_values(by=["Ano", "Mes"]).drop_duplicates(subset=["Mes", "Ano", "Polo"], keep="last").reset_index(drop=True)
 
-@st.cache_data(show_spinner=False, ttl=300)
+@st.cache_data(show_spinner=False, ttl=60)
 def load_data():
-    mc = validate_masterclass_df(_read_csv_safe(DATA_FILE))
-    if not mc.empty:
-        mc["Data_dt"] = pd.to_datetime(mc["Data"])
-        mc["Mes/Ano"] = mc["Data_dt"].dt.strftime("%m/%Y")
-    mt = validate_metas_df(_read_csv_safe(METAS_FILE))
-    return mc, mt
+    """Load masterclass and metas data from Supabase, returning DataFrames in legacy format"""
+    try:
+        # Load masterclass data with joined references
+        mc_data = _sb_get("masterclass", {"tenant_id": f"eq.{TENANT_UUID}", "select": "*"})
+
+        # Load lookup tables
+        polos_lookup, cidades_lookup, pals_lookup = _load_lookup_tables()
+        polo_by_id = {v: k for k, v in polos_lookup.items()}
+        pals_by_id = {v: k for k, v in pals_lookup.items()}
+
+        # Build masterclass dataframe
+        mc_rows = []
+        for row in mc_data:
+            polo_name = polo_by_id.get(row.get("polo_id"), "")
+            cidade_id = row.get("cidade_id")
+            cidade_name = next((c_name for (p_id, c_name), c_id in cidades_lookup.items() if c_id == cidade_id), "")
+            pal_name = pals_by_id.get(row.get("palestrante_id"), "")
+
+            mc_rows.append({
+                "ID": row.get("id", ""),
+                "Tenant": TENANT_ID,
+                "Data": row.get("data"),
+                "Polo": polo_name,
+                "Cidade": cidade_name,
+                "Sala": row.get("sala", 0),
+                "Inscricoes": row.get("inscricoes", 0),
+                "Palestrante": pal_name,
+            })
+
+        mc = validate_masterclass_df(pd.DataFrame(mc_rows))
+        if not mc.empty:
+            mc["Data_dt"] = pd.to_datetime(mc["Data"])
+            mc["Mes/Ano"] = mc["Data_dt"].dt.strftime("%m/%Y")
+        else:
+            mc = pd.DataFrame(columns=MASTERCLASS_COLS + ["Data_dt", "Mes/Ano"])
+
+        # Load metas data
+        mt_data = _sb_get("metas", {"tenant_id": f"eq.{TENANT_UUID}", "select": "*"})
+
+        mt_rows = []
+        for row in mt_data:
+            polo_id = row.get("polo_id")
+            polo_name = polo_by_id.get(polo_id, "")
+
+            mt_rows.append({
+                "ID": row.get("id", ""),
+                "Tenant": TENANT_ID,
+                "Mes": row.get("mes", 1),
+                "Ano": row.get("ano", 2020),
+                "Polo": polo_name,
+                "Quantidade_MC": row.get("quantidade_mc", 0),
+                "Meta_Vendas_Por_MC": row.get("meta_vendas_por_mc", 0),
+                "Meta_Inscricoes": row.get("meta_inscricoes", 0),
+            })
+
+        mt = validate_metas_df(pd.DataFrame(mt_rows))
+
+        return mc, mt
+    except Exception as e:
+        st.error(f"Erro ao carregar dados do Supabase: {str(e)}")
+        return pd.DataFrame(columns=MASTERCLASS_COLS + ["Data_dt", "Mes/Ano"]), pd.DataFrame(columns=METAS_COLS)
 
 def save_masterclass(df_in: pd.DataFrame):
-    _atomic_write_csv(DATA_FILE, validate_masterclass_df(df_in))
-    load_data.clear()
+    """Save masterclass data to Supabase, replacing existing records"""
+    try:
+        df_validated = validate_masterclass_df(df_in)
+
+        # Load lookup tables for ID mapping
+        polos_lookup, cidades_lookup, pals_lookup = _load_lookup_tables()
+
+        # Delete existing masterclass records for this tenant
+        _sb_delete("masterclass", {"tenant_id": f"eq.{TENANT_UUID}"})
+
+        # Insert new records
+        for idx, row in df_validated.iterrows():
+            polo_id = polos_lookup.get(row["Polo"])
+            cidade_id = cidades_lookup.get((polo_id, row["Cidade"])) if polo_id else None
+            pal_id = pals_lookup.get(row["Palestrante"])
+
+            if polo_id and cidade_id and pal_id:
+                _sb_post("masterclass", {
+                    "id": row["ID"],
+                    "tenant_id": TENANT_UUID,
+                    "data": str(row["Data"]),
+                    "polo_id": polo_id,
+                    "cidade_id": cidade_id,
+                    "sala": int(row["Sala"]),
+                    "inscricoes": int(row["Inscricoes"]),
+                    "palestrante_id": pal_id,
+                })
+
+        audit("SAVE_MASTERCLASS", f"Saved {len(df_validated)} masterclass records", len(df_validated))
+        load_data.clear()
+    except Exception as e:
+        st.error(f"Erro ao salvar Masterclass: {str(e)}")
 
 def save_metas(df_in: pd.DataFrame):
-    _atomic_write_csv(METAS_FILE, validate_metas_df(df_in))
-    load_data.clear()
+    """Save metas data to Supabase, replacing existing records"""
+    try:
+        df_validated = validate_metas_df(df_in)
+
+        # Load lookup tables for ID mapping
+        polos_lookup, cidades_lookup, pals_lookup = _load_lookup_tables()
+
+        # Delete existing metas records for this tenant
+        _sb_delete("metas", {"tenant_id": f"eq.{TENANT_UUID}"})
+
+        # Insert new records
+        for idx, row in df_validated.iterrows():
+            polo_id = polos_lookup.get(row["Polo"])
+
+            if polo_id:
+                _sb_post("metas", {
+                    "id": row["ID"],
+                    "tenant_id": TENANT_UUID,
+                    "mes": int(row["Mes"]),
+                    "ano": int(row["Ano"]),
+                    "polo_id": polo_id,
+                    "quantidade_mc": int(row["Quantidade_MC"]),
+                    "meta_vendas_por_mc": int(row["Meta_Vendas_Por_MC"]),
+                })
+
+        audit("SAVE_METAS", f"Saved {len(df_validated)} meta records", len(df_validated))
+        load_data.clear()
+    except Exception as e:
+        st.error(f"Erro ao salvar Metas: {str(e)}")
 
 # =========================================================
 # 5. REGRAS DE NEGÓCIO E COMISSÃO
