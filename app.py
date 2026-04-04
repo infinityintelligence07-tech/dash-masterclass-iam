@@ -1407,7 +1407,14 @@ def module_dashboard(df_mc, df_mt, cfg):
             real_polo = df_f.groupby("Polo", as_index=False).agg(Realizado=("Inscricoes", "sum")) if not df_f.empty else pd.DataFrame(columns=["Polo", "Realizado"])
             view = metas_periodo.merge(real_polo, on="Polo", how="outer").fillna(0)
             view = view.rename(columns={"Meta": "Projetado"})
-            view["Atingimento"] = np.where(view["Projetado"] > 0, (view["Realizado"] / view["Projetado"] * 100), 0)
+            proj = pd.to_numeric(view["Projetado"], errors="coerce").fillna(0)
+            real = pd.to_numeric(view["Realizado"], errors="coerce").fillna(0)
+            view["Atingimento"] = np.divide(
+                real.to_numpy(dtype=float),
+                proj.to_numpy(dtype=float),
+                out=np.zeros(len(view), dtype=float),
+                where=proj.to_numpy(dtype=float) != 0
+            ) * 100
             view = view.sort_values("Atingimento", ascending=False)
 
             if view.empty or (view["Projetado"].sum() == 0 and view["Realizado"].sum() == 0):
